@@ -1,0 +1,246 @@
+%% rick2019_12_summary
+
+% built from rick2019_08+09_summary
+    % built from rick2019_03_summary_v3
+  
+
+%% Notes for updating
+folder = 'C:\Users\zls5\Desktop\2019-15+2020-01 Starting data\' ;
+inputfile = '2019-15+2020-01 MedPC Summary.xlsx';
+
+outputfolder = 'C:\Users\zls5\Desktop\2019-12 example\Outputs\';
+outputfile = '2019-15+2020-01 MedPC Summary processed';
+
+% mice in each group
+% sorting by groups using Group column in MEDPC file
+% first vector is subjects, second is order of appearance
+% NOTE: These names must be identical to the group names that appear in the
+% xls file for this file to detect them
+
+% TODO: Leave a slot for missing mice (empty col/row where mouse would be)
+% for example if a mouse is omitted here, leave an empty row for it 
+
+groups = {
+    'Saline', [102, 101, 103, 104, 113, 114, 115, 116, 117, 118], [];
+    'Scramble', [1, 2, 7, 8, 3, 9, 13, 14], [];
+    'M1KD', [4, 12, 5, 6, 10, 11, 15, 16], [];
+    'Nicotine', [105, -1, 107, 108, 109, 110, 111, 112, 119, 120], [];
+};
+
+experiments = { groups{1,1}, groups{4,1}; groups{2,1}, groups{3,1} };
+
+max_grouplen = max(cellfun(@length, groups(:, 2) ));
+grouporder = groups{:, 1};
+
+% generate empty groupdata array from groups
+for i=1:size(groups,1)
+    groupdata{i,1} = {}; 
+end
+
+groupdata = cat(2, groups(:, 1), cell(size(groups, 1), max_grouplen));
+% groupdataindex = {'salinedataindex', 'mecdataindex', 'scopdataindex', 'mec_scopdataindex'};
+
+  
+%% Import the data
+raw = readcell([folder inputfile]);
+
+% Cut the header
+raw_test = raw(2:end, :);
+
+%Identify all unique mouse ID numbers and save in variable 
+all_mouse_ID = unique(cell2mat(raw([2:end],1)));
+datefordaykeys = unique(cell2mat(raw([2:end],2)));
+
+%Identify all unique box numbers and save in variable 
+all_box_ID = unique(cell2mat(raw([2:end],7)));
+
+% TODO: Ask rick whether the first n entries will be the mouse order, where
+% n is the number of unique mouse labels
+allmouseorder = raw_test(1:length(all_mouse_ID), 1);
+
+%Training day labels (empty space at beginning for header row)
+daykey = {'Free Reward'; 'FR1 1' ; 'FR1 2'; 'FR1 3' ; 'FR1 4' ; 'Cued 1' ; 'Cued 2'; 'Cued 3'; 'Cued 4' ...
+    ; 'Cued TO 1'; 'Cued TO 2'; 'Cued TO 3'; 'Cued TO 4';'Cued TO 5'; 'Cued TO 6';'Cued TO 7';'Cued TO 8'};
+
+% Summary file header column names can differ from the names of the columns
+% pulled from the input file, so they must be tracked separately (e.g. 
+% may contain fields calculated from input data)
+rawheadercolumnnames = raw(1, :);
+summaryheadernames = { 'correct', 'inactive', 'rewards', 'receptacle', 'tones', 'incorrect', 'timeouts', 'hitrate', 'discrimination'; };
+headercolindices = { 'correct', -1; 'inactive', -1; 'rewards', -1,; 'receptacle', -1; 'tones', -1; 'incorrect', -1; 'timeouts', -1; };
+
+% Search for each column header in the raw data file
+for headeridx=1:size(headercolindices, 1)
+   index = find(strcmp(lower(rawheadercolumnnames), lower(headercolindices{headeridx, 1})), 1);
+   if ~isempty(index)
+        headercolindices{headeridx, 2} = index(1);
+   else
+       fprintf('Could not find header %s in the raw data file. Please be sure this is the name of the header\n', headercolindices{headeridx, 1});
+   end
+end
+
+for mouse_num = 1:length(all_mouse_ID)
+    
+    
+    %Cut down raw to just current mouse
+    %Remove the header from raw and reset variable to raw_test
+    mouse_ID = all_mouse_ID(mouse_num);
+    
+    raw_test = raw(2:end,:);
+    
+    %Index all rows with mouse_ID and select those rows from raw_test
+    group = -1;
+    raw_mouse = raw_test((cell2mat(raw_test(:,1)) == mouse_ID),:);
+    for i=1:size(groups,1)
+       if strcmp(raw_mouse{1,6}, groups{i,1})
+          group = i;
+          groups{i,3}(length(groups{i,3})+1) = mouse_ID;
+       end
+    end
+    
+    % If no group is found for the mouse corresponding to mouse_ID, it will
+    % be skipped.
+    if (group ~= -1) 
+       
+        % Calculate index as the number of spaces allocated to each group minus
+        % the number of unoccupied spaces
+        % The plus two is to account for the one occupied space at the
+        % beginning from the name and the natural matlab offset (arrays start
+        % at one)
+        j = max_grouplen + 2 - nnz(cellfun(@isempty, groupdata(group, :)));
+        current_group_data = {};
+        
+        %Cycle through all days in a given mouse for each of the 7 variables
+        %used to be 9 but some were just relics from before like Stim
+        %Queue and Stim number
+        for row = 1:size(raw_mouse,1)
+            
+            %index for placing data into groupdata cells
+            vidx = 1;
+            
+            %cycle through variables specified through header names and grab data(see
+            % note on headercolindices)
+            variableindices = cell2mat(transpose(headercolindices(:, 2)));
+            for variable = variableindices
+                current_group_data{row, vidx} = raw_mouse{row, variable};
+                vidx = vidx + 1;
+            end
+            
+            hits = raw_mouse{row, 9};
+            inactive = raw_mouse{row, 10};
+            rewards = raw_mouse{row, 11};
+            tones = raw_mouse{row, 13};
+            incorrect = raw_mouse{row, 15};
+            
+            if tones > 0
+                current_group_data{row, vidx} = ( rewards / tones );
+            else
+                current_group_data{row, vidx} = '';
+            end
+            vidx = vidx + 1;
+            
+            %Add discrimination as variable 11
+            % NOTE: calculated discrimination as hits / hits + incorrect +
+            % inactive
+            if row > 5
+                discrim = ( hits / ( hits + inactive + incorrect) );
+                current_group_data{row, vidx} = discrim;
+            end
+        end
+    
+        %% Add headers, Create unique variable ID for data and clear variables
+        header = transpose(allmouseorder);
+        cat(1,raw(1,:), raw_mouse);
+        current_group_data = cat(1, summaryheadernames, current_group_data);
+        groupdata{group,j} = current_group_data;
+    else
+        fprintf("Cannot find group %s, ignoring. Please ensure that your group names are correct given that this code may not work without correct names.\n", raw_mouse{1, 6});
+    end
+end
+
+%% Concat different groups into one array for prism plotting
+%go through all variables and cat them as: eyfp,chr2
+%then save them in xlsx file
+
+%for shaping only
+% allvariablename = { 'correct', 'inactive', 'rewards', 'receptacle', 'tones', 'incorrect', 'timeouts', 'hitrate'};
+
+%for after Cued Day 1
+allvariablename = { 'correct', 'inactive', 'rewards', 'receptacle', 'tones', 'incorrect', 'timeouts', 'hitrate', 'discrim'};
+
+
+% Have to transpose since we're making allmouseorder a column header
+% instead of a column
+allmouseorder = transpose(allmouseorder);
+allmouseorder = cat(2, {''}, allmouseorder);
+emptydaycell = {NaN};
+
+% TODO: Figure out why this only dumps correct and incorrect instead of the
+% whole range in allvariablenames
+for experiment=1:size(experiments, 1)
+    experiment_variables = experiments(experiment, :);
+    exp_mouseorder = [];
+    
+    % Needs to be the outer scope in order to save the whole experiment in
+    % sheets by variable
+    for var_idx=1:length(summaryheadernames)
+        variabledata = []; exp_mouseorder = [];
+        
+        for expvar = 1:size(experiment_variables, 2)
+            gdr_idx = find( strcmp( groupdata(:, 1), experiment_variables{expvar} ));
+            groupdatarow = groupdata(gdr_idx, :);
+            
+            groupmouserow = find( strcmp( groups(:, 1), experiment_variables{1, expvar} ));
+            exp_mouseorder = cat(2, exp_mouseorder, groups{groupmouserow, 3});
+            trialmouseorder = groups{groupmouserow, 3};
+            
+            % which mice to use in the datasheet
+            usemouserow = groups{groupmouserow, 2};
+            
+            % take the name of the name at var_idx in the first sheet to be
+            % the name of the sheet
+            sheetname = groupdatarow{1, 2}{1, var_idx};
+            
+            % Sometimes groupdata row gets padded with empty arrays, so
+            % make sure j doesn't exceed the actual length of usemouserow
+            % when checking
+            for j=2:length(groupdatarow)
+                if j-1 < length(usemouserow) && isempty(find( trialmouseorder == usemouserow(j-1) ))
+                    variabledata = cat(2, variabledata, cell(size(daykey, 1), 1));
+                elseif size(groupdatarow{1, j}, 1) ~= 0 && size(groupdatarow{1, j}, 2) ~= 0
+                    variabledata = cat(2, variabledata, groupdatarow{1,j}(2:end, var_idx));
+                end
+            end
+            
+        end
+        
+        % write mouse number to top row of data, with an empty cell at the beginning
+        variabledata = cat(1, num2cell(exp_mouseorder), variabledata);
+        spaced_daykey = cat(1, { '' }, daykey);
+        
+        % write variable day to left column of data
+        variabledata = cat(2, spaced_daykey, variabledata);
+        experiment_names = join([ experiment_variables(:) ]);
+        
+        fprintf('Writing %s %s\n', experiment_names{1}, sheetname);
+        writecell(variabledata, [outputfolder outputfile ' ' experiment_names{1} '.xlsx'], 'Sheet', summaryheadernames{1, var_idx});
+    end
+    
+    % Add mouseorder to a new sheet
+    writematrix(exp_mouseorder,[outputfolder outputfile ' ' experiment_names{1} '.xlsx'], 'Sheet', 'mouseorder');
+end
+
+%add a sheet with order of mice cat'd
+% writematrix(cell2mat(allmouseorder(2:end)),[outputfolder outputfile], 'Sheet', 'mouseorder');
+
+%% Save data in file
+
+%save all variables together
+save([outputfolder outputfile '.mat']);
+
+
+%clear data dataname variable row raw 
+
+
+        
+ 
